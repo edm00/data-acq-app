@@ -11,6 +11,8 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
+import PredictionPanel from './PredictionPanel';
+
 
 ChartJS.register(
   CategoryScale,
@@ -40,7 +42,7 @@ const ArduinoSensorCollector = () => {
   const [settings, setSettings] = useState({
     filename: 'sensor_data',
     sampleName: '',
-    duration: 5,
+    duration: 10,
     baudRate: 9600,
     temp: 23.0,
     humidity: 31.5
@@ -70,6 +72,12 @@ const ArduinoSensorCollector = () => {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  useEffect(()=>{
+    if(!recordingTimeoutRef.current)
+      downloadCSV();
+  
+  },[recordingTimeoutRef.current])
 
   // Chart colors for all sensors
   const sensorColors = [
@@ -181,10 +189,14 @@ const ArduinoSensorCollector = () => {
   const disconnectFromSerial = async () => {
     try {
       if (readerRef.current) {
+        console.log("reader",readerRef.current);
+        
         await readerRef.current.cancel();
         readerRef.current = null;
       }
       if (portRef.current) {
+        console.log("port",readerRef.current);
+
         await portRef.current.close();
         portRef.current = null;
       }
@@ -293,6 +305,14 @@ const ArduinoSensorCollector = () => {
     }
   };
 
+const getNumericSensorData = () => {
+    const cleaned = {};
+    Object.keys(sensorData).forEach(key => {
+        cleaned[key] = sensorData[key] === '--' ? NaN : parseFloat(sensorData[key]);
+    });
+    return cleaned;
+};
+
   const startRecording = () => {
     setRecordedData([]);
     dataIndexRef.current = 0;
@@ -308,7 +328,7 @@ const ArduinoSensorCollector = () => {
     
     setIsRecording(true);
     
-    addLog(`Started recording - will stop after ${settings.duration} minutes`);
+    addLog(`Started recording - will stop after ${settings.duration} seconds`);
     
     if (recordingTimeoutRef.current) {
       clearTimeout(recordingTimeoutRef.current);
@@ -316,8 +336,9 @@ const ArduinoSensorCollector = () => {
     recordingTimeoutRef.current = setTimeout(() => {
       stopRecording();
       addLog('Auto-stop: Recording duration completed');
-      downloadCSV();
-    }, settings.duration * 60 * 1000);
+      console.log("Data saved ! and downloaded ", recordedData);
+      // save data as json
+    }, settings.duration * 1000);
   };
 
   const stopRecording = () => {
@@ -460,12 +481,12 @@ const ArduinoSensorCollector = () => {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Duration (min):</label>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Duration (sec):</label>
             <input 
               type="number" 
               value={settings.duration}
               onChange={(e) => handleSettingChange('duration', parseInt(e.target.value) || 10)}
-              min="1"
+              min="10"
               style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
             />
           </div>
@@ -635,6 +656,15 @@ const ArduinoSensorCollector = () => {
       }}>
         <Line data={chartData} options={chartOptions} />
       </div>
+
+
+            {/* New Prediction Panel */}
+        <PredictionPanel 
+            currentSensorData={getNumericSensorData()} 
+            isConnected={isConnected} 
+            addLog={addLog} 
+        />
+
 
       {/* Log */}
       <div style={{ 
