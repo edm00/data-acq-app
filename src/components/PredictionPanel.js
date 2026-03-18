@@ -1,13 +1,49 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Cookies from 'js-cookie';
+
 
 const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
   const [baselineSet, setBaselineSet] = useState(false);
+  const [baselineData, setBaselineData] = useState(null);
   const [isPredicting, setIsPredicting] = useState(false);
   const [countdown, setCountdown] = useState(30);
   const [predictionResult, setPredictionResult] = useState(null);
   const [error, setError] = useState(null);
   const [clicked,setClicked] = useState(0)
   const API_URL = "http://127.0.0.1:8000";
+  const [baselineTimestamp, setBaselineTimestamp] = useState(null);
+
+
+// --- 1. Retrieve Baseline from Cookies on Component Mount ---
+  useEffect(() => {
+    const savedBaseline = Cookies.get('sensor_baseline');
+    const savedTime = Cookies.get('baseline_timestamp');
+    
+    if (savedBaseline && savedTime) {
+      const parsedBaseline = JSON.parse(savedBaseline);
+      setBaselineData(parsedBaseline);
+      setBaselineTimestamp(savedTime);
+      
+      // Sync the retrieved baseline with the backend immediately
+      syncBaselineWithBackend(parsedBaseline);
+      addLog(`Restored baseline from ${savedTime}`);
+      console.log(savedBaseline,savedTime);
+      
+    }
+  }, []);
+
+  // Helper to send baseline to Python API
+  const syncBaselineWithBackend = async (data) => {
+    try {
+      await fetch(`${API_URL}/set_baseline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } catch (err) {
+      addLog("❌ Failed to sync baseline with backend server.");
+    }
+  };
 
   // Handle the 30-second countdown logic
   useEffect(() => {
@@ -42,17 +78,25 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
       addLog("⚠️ Cannot set baseline: Waiting for valid sensor data...");
       return;
     }
+     const timestamp = new Date().toLocaleString();
 
     const res = fetch(`${API_URL}/set_baseline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(currentSensorData),
       }).then(res=> {if (res.ok) {
+        setBaselineData(currentSensorData);
+        setBaselineTimestamp(timestamp);
+        
+        Cookies.set('sensor_baseline', JSON.stringify(currentSensorData), { expires: 7 }); // Saves for 7 days
+        Cookies.set('baseline_timestamp', timestamp, { expires: 7 });
+
+        addLog(`✅ New baseline saved at ${timestamp}`);
         setBaselineSet(true);
         setClicked((prev)=>{
           return prev+1
         });
-        addLog("✅ Baseline fixed successfully.");
+        // addLog("✅ Baseline fixed successfully.");
         
         return res.json();
       } else {
@@ -88,7 +132,18 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(currentSensorData),
       });
+      
       const data = await response.json();
+      if (data["status_code"]==400)
+      {
+        console.log(data);
+        const baseline = Cookies.get("sensor_baseline")|| baselineData
+        
+        const baseline_data = JSON.parse(baseline);
+        console.log("setting baseline before predict", baseline_data);
+        syncBaselineWithBackend(baseline_data)
+        
+      }
       console.log("result",data,data.confidence,typeof(data.confidence),parseInt(data.confidence,10));
       
       setPredictionResult(data);
@@ -110,6 +165,12 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
     }}>
       <h3 style={{ marginTop: 0 }}> AI Prediction </h3>
 
+      {baselineTimestamp && (
+          <span style={{ fontSize: '0.75rem', color: '#7f8c8d' }}>
+            Last Calibrated: <strong>{baselineTimestamp}</strong>
+          </span>
+        )}
+
       {!dataReady && isConnected && (
         <p style={{ color: '#e67e22', fontSize: '0.85rem' }}>⌛ Waiting for stable sensor readings...</p>
       )}
@@ -124,7 +185,7 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
             color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'
           }}
         >
-          {baselineSet ? "✓ Baseline Set" : "1. Fix Baseline (Clean Air)"}
+          {baselineSet ? "✓ Update Baseline" : "1. Fix Baseline (Clean Air)"}
         </button>
 
         <button 
@@ -159,7 +220,7 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
             {parseInt(predictionResult.confidence,10)>50 ? predictionResult.prediction.toUpperCase():"Unknown" }
           </span>
           <span style={{ marginLeft: '15px', color: '#7f8c8d' }}>
-            Confidence: {predictionResult.confidence}
+            Confidence: {parseInt(predictionResult.confidence,10)>50 ?predictionResult.confidence:""}
           </span>
         </div>
       )}

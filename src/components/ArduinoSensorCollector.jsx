@@ -12,7 +12,7 @@ import {
   Legend,
 } from 'chart.js';
 import PredictionPanel from './PredictionPanel';
-
+import Cookies from 'js-cookie';
 
 ChartJS.register(
   CategoryScale,
@@ -73,9 +73,9 @@ const ArduinoSensorCollector = () => {
     settingsRef.current = settings;
   }, [settings]);
 
-  useEffect(()=>{
+  useEffect( ()=>{
     if(!recordingTimeoutRef.current)
-      downloadCSV();
+       downloadCSV();
   
   },[recordingTimeoutRef.current])
 
@@ -350,7 +350,28 @@ const getNumericSensorData = () => {
     addLog(`Stopped recording - collected ${recordedData.length} data points`);
   };
 
-  const downloadCSV = () => {
+  const syncData = async (rData)=>{
+    // --- NEW BACKEND SYNC LOGIC ---
+  addLog("📤 Syncing data to backend folder...");
+  try {
+    const baseline = JSON.parse(Cookies.get('sensor_baseline') || '{}');
+    await fetch("http://127.0.0.1:8000/upload_session", {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        data: rData,
+        baseline: baseline,
+        sampleName: settings.sampleName
+      }),
+    }).then(res=>res.json()).then(d=>console.log(d)
+    );
+    addLog("✅ Data saved and processed in /backend_data");
+  } catch (err) {
+    addLog("❌ Backend sync failed. Only local download completed.");
+  }
+  };
+  
+  const downloadCSV = async () => {
     if (recordedData.length === 0) {
       addLog('No data to download');
       return;
@@ -370,6 +391,9 @@ const getNumericSensorData = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    
+    await syncData(recordedData);
+    
     
     addLog(`Downloaded ${recordedData.length} data points as CSV`);
   };
