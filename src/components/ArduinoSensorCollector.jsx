@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import PredictionPanel from './PredictionPanel';
 import Cookies from 'js-cookie';
+import PredictionPanel2 from './PredictionPanel2';
 
 ChartJS.register(
   CategoryScale,
@@ -683,12 +684,18 @@ const getNumericSensorData = () => {
 
 
             {/* New Prediction Panel */}
-        <PredictionPanel 
+        {/* <PredictionPanel 
             currentSensorData={getNumericSensorData()} 
             isConnected={isConnected} 
             addLog={addLog} 
-        />
+        /> */}
+     <PredictionPanel2
 
+            currentSensorData={getNumericSensorData()} 
+            isConnected={isConnected} 
+            addLog={addLog}
+     
+     />
 
       {/* Log */}
       <div style={{ 

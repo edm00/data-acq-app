@@ -1,20 +1,21 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Cookies from 'js-cookie';
 
-
-const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
+const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
   const [baselineSet, setBaselineSet] = useState(false);
   const [baselineData, setBaselineData] = useState(null);
   const [isPredicting, setIsPredicting] = useState(false);
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(10);
   const [predictionResult, setPredictionResult] = useState(null);
   const [error, setError] = useState(null);
-  const [clicked,setClicked] = useState(0)
-  const API_URL = "http://127.0.0.1:8000";
+  const [clicked, setClicked] = useState(0);
   const [baselineTimestamp, setBaselineTimestamp] = useState(null);
+  
+  // --- New State for Windowed Prediction ---
+  const [predictionBuffer, setPredictionBuffer] = useState([]);
+  const API_URL = "http://127.0.0.1:8000";
 
-
-// --- 1. Retrieve Baseline from Cookies on Component Mount ---
+  // --- 1. Retrieve Baseline from Cookies ---
   useEffect(() => {
     const savedBaseline = Cookies.get('sensor_baseline');
     const savedTime = Cookies.get('baseline_timestamp');
@@ -23,16 +24,13 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
       const parsedBaseline = JSON.parse(savedBaseline);
       setBaselineData(parsedBaseline);
       setBaselineTimestamp(savedTime);
-      
-      // Sync the retrieved baseline with the backend immediately
       syncBaselineWithBackend(parsedBaseline);
       addLog(`Restored baseline from ${savedTime}`);
-      console.log(savedBaseline,savedTime);
+      setBaselineSet(true);
       
     }
   }, []);
 
-  // Helper to send baseline to Python API
   const syncBaselineWithBackend = async (data) => {
     try {
       await fetch(`${API_URL}/set_baseline`, {
@@ -41,91 +39,27 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
         body: JSON.stringify(data),
       });
     } catch (err) {
-      addLog("❌ Failed to sync baseline with backend server.");
+      addLog("❌ Failed to sync baseline with backend.");
     }
   };
 
-  // Handle the 30-second countdown logic
+  // --- 2. Sampling & Countdown Logic ---
   useEffect(() => {
     let timer;
     if (isPredicting && countdown > 0) {
-      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      // Capture a sample every time the second ticks
+      captureSnapshot();
+      timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
     } else if (isPredicting && countdown === 0) {
-      sendPredictionRequest();
+      finalizeBestPrediction();
     }
     return () => clearTimeout(timer);
   }, [isPredicting, countdown]);
 
-  useEffect(()=>{
-    if(isConnected && baselineSet){
-      console.log(error);
-      
-       setError(null)
-    }
-      
-  },[baselineSet,clicked]);
+  // --- 3. Capture Single Snapshot ---
+  const captureSnapshot = async () => {
+    if (!isDataValid()) return;
 
-// --- Helper: Check if all sensor values are valid numbers ---
-  const isDataValid = () => {
-    if (!currentSensorData) return false;
-    const values = Object.values(currentSensorData);
-    // Ensure we have all 10 fields and none of them are NaN or Infinity
-    return values.length === 10 && values.every(val => typeof val === 'number' && !isNaN(val));
-  };
-
-  const fixBaseline = async () => {
-    if (!isDataValid()) {
-      addLog("⚠️ Cannot set baseline: Waiting for valid sensor data...");
-      return;
-    }
-     const timestamp = new Date().toLocaleString();
-
-    const res = fetch(`${API_URL}/set_baseline`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentSensorData),
-      }).then(res=> {if (res.ok) {
-        setBaselineData(currentSensorData);
-        setBaselineTimestamp(timestamp);
-        
-        Cookies.set('sensor_baseline', JSON.stringify(currentSensorData), { expires: 7 }); // Saves for 7 days
-        Cookies.set('baseline_timestamp', timestamp, { expires: 7 });
-
-        addLog(`✅ New baseline saved at ${timestamp}`);
-        setBaselineSet(true);
-        setClicked((prev)=>{
-          return prev+1
-        });
-        // addLog("✅ Baseline fixed successfully.");
-        
-        return res.json();
-      } else {
-         throw new Error(`HTTP error! Status: ${res.status}`);
-      }
-    }).then(data=>{
-      console.log("success",data);
-      
-    })
-    
-  };
-
-  const startPredictionCycle = () => {
-    if (!baselineSet) {
-      alert("Please fix baseline in clean air first!");
-      return;
-    }
-    if (!isDataValid()) {
-      addLog("⚠️ Cannot predict: Sensor data is currently invalid.");
-      return;
-    }
-    setIsPredicting(true);
-    setCountdown(10);
-    setPredictionResult(null);
-    addLog("⏱️ Prediction started. Expose sensors to sample now...");
-  };
-
-  const sendPredictionRequest = useCallback( async () => {
-    setIsPredicting(false);
     try {
       const response = await fetch(`${API_URL}/predict`, {
         method: 'POST',
@@ -134,28 +68,95 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
       });
       
       const data = await response.json();
-      if (data["status_code"]==400)
-      {
-        console.log(data);
-        const baseline = Cookies.get("sensor_baseline")|| baselineData
-        
-        const baseline_data = JSON.parse(baseline);
-        console.log("setting baseline before predict", baseline_data);
-        syncBaselineWithBackend(baseline_data)
-        
-      }
-      console.log("result",data,data.confidence,typeof(data.confidence),parseInt(data.confidence,10));
       
-      setPredictionResult(data);
-      addLog(`🎯 Prediction Received: ${data.prediction} (${data.confidence || ''})`);
+      if (data.status_code == 400) {
+        const baseline = Cookies.get("sensor_baseline") || JSON.stringify(baselineData);
+        syncBaselineWithBackend(JSON.parse(baseline));
+        console.log("baseline synced ",baseline);
+        
+        return;
+      }
+
+      // Add this prediction to our 5-second buffer
+      setPredictionBuffer(prev => [...prev, data]);
+      console.log("Sample captured:", data.prediction, data.confidence);
     } catch (err) {
-      addLog("❌ API Error: Prediction request failed.");
-      setError("Failed to reach API");
+      console.error("Sampling error:", err);
     }
-  },[currentSensorData, addLog]);
+  };
+
+  // --- 4. Process the Buffer (Highest Confidence) ---
+  const finalizeBestPrediction = () => {
+    setIsPredicting(false);
+    
+    if (predictionBuffer.length === 0) {
+      addLog("❌ No valid samples were captured.");
+      setError("Sampling failed");
+      return;
+    }
+
+    // Find the object with the highest confidence value
+    const bestMatch = predictionBuffer.reduce((prev, current) => {
+      const currentConf = parseFloat(current.confidence) || 0;
+      const prevConf = parseFloat(prev.confidence) || 0;
+      return currentConf > prevConf ? current : prev;
+    });
+
+    setPredictionResult(bestMatch);
+    addLog(`🎯 Best of ${predictionBuffer.length} samples: ${bestMatch.prediction} (${bestMatch.confidence}%)`);
+    setPredictionBuffer([]); // Clear for next run
+  };
+
+  const isDataValid = () => {
+    if (!currentSensorData) return false;
+    const values = Object.values(currentSensorData);
+    return values.length === 10 && values.every(val => typeof val === 'number' && !isNaN(val));
+  };
+
+  const fixBaseline = async () => {
+    if (!isDataValid()) {
+      addLog("⚠️ Cannot set baseline: Waiting for valid data...");
+      return;
+    }
+    const timestamp = new Date().toLocaleString();
+
+    try {
+      const res = await fetch(`${API_URL}/set_baseline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentSensorData),
+      });
+      
+      if (res.ok) {
+        setBaselineData(currentSensorData);
+        setBaselineTimestamp(timestamp);
+        Cookies.set('sensor_baseline', JSON.stringify(currentSensorData), { expires: 7 });
+        Cookies.set('baseline_timestamp', timestamp, { expires: 7 });
+        setBaselineSet(true);
+        addLog(`✅ New baseline saved at ${timestamp}`);
+      }
+    } catch (err) {
+      addLog("❌ Error saving baseline.");
+    }
+  };
+
+  const startPredictionCycle = () => {
+    if (!baselineSet) {
+      alert("Please fix baseline in clean air first!");
+      return;
+    }
+    setIsPredicting(true);
+    setCountdown(10); // Changed to 5 seconds for your requirement
+    setPredictionBuffer([]); // Reset buffer
+    setPredictionResult(null);
+    setError(null);
+    addLog("⏱️ Sampling started. Collecting 5 seconds of data...");
+  };
 
   const dataReady = isDataValid() && isConnected;
 
+  // JSX rendering logic follows here...
+  
   return (
     <div style={{ 
       background: '#eef2f7', 
@@ -218,10 +219,10 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
         }}>
           <strong>Result:</strong> 
           <span style={{ fontSize: '1.4em', marginLeft: '10px', color: '#2c3e50' }}>
-            {parseInt(predictionResult.confidence,10)>30 ? predictionResult.prediction.toUpperCase():"Unknown" }
+            {parseInt(predictionResult.confidence,10)>50 ? predictionResult.prediction.toUpperCase():"Unknown" }
           </span>
           <span style={{ marginLeft: '15px', color: '#7f8c8d' }}>
-            Confidence: {parseInt(predictionResult.confidence,10)>30 ?predictionResult.confidence:""}
+            Confidence: {parseInt(predictionResult.confidence,10)>50 ?predictionResult.confidence:""}
           </span>
         </div>
       )}
@@ -229,4 +230,4 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
   );
 };
 
-export default PredictionPanel;
+export default PredictionPanel2;
