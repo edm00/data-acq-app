@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+  import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Cookies from 'js-cookie';
 
 const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
@@ -11,6 +11,7 @@ const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
   const [clicked, setClicked] = useState(0);
   const [baselineTimestamp, setBaselineTimestamp] = useState(null);
   
+
   // --- New State for Windowed Prediction ---
   const [predictionBuffer, setPredictionBuffer] = useState([]);
   const API_URL = "http://127.0.0.1:8000";
@@ -61,7 +62,7 @@ const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
     if (!isDataValid()) return;
 
     try {
-      const response = await fetch(`${API_URL}/predict`, {
+      const response = await fetch(`${API_URL}/predict_nn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(currentSensorData),
@@ -113,32 +114,7 @@ const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
     return values.length === 10 && values.every(val => typeof val === 'number' && !isNaN(val));
   };
 
-  const fixBaseline = async () => {
-    if (!isDataValid()) {
-      addLog("⚠️ Cannot set baseline: Waiting for valid data...");
-      return;
-    }
-    const timestamp = new Date().toLocaleString();
-
-    try {
-      const res = await fetch(`${API_URL}/set_baseline`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentSensorData),
-      });
-      
-      if (res.ok) {
-        setBaselineData(currentSensorData);
-        setBaselineTimestamp(timestamp);
-        Cookies.set('sensor_baseline', JSON.stringify(currentSensorData), { expires: 7 });
-        Cookies.set('baseline_timestamp', timestamp, { expires: 7 });
-        setBaselineSet(true);
-        addLog(`✅ New baseline saved at ${timestamp}`);
-      }
-    } catch (err) {
-      addLog("❌ Error saving baseline.");
-    }
-  };
+  const fixBaseline = async () => { };
 
   const startPredictionCycle = () => {
     if (!baselineSet) {
@@ -155,6 +131,8 @@ const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
 
   const dataReady = isDataValid() && isConnected;
 
+
+  const test = false
   // JSX rendering logic follows here...
   
   return (
@@ -167,7 +145,7 @@ const PredictionPanel2 = ({ currentSensorData, isConnected, addLog }) => {
     }}>
       <h3 style={{ marginTop: 0 }}> AI Prediction </h3>
 
-      {baselineTimestamp && (
+      {baselineTimestamp && test && (
           <span style={{ fontSize: '0.75rem', color: '#7f8c8d' }}>
             Last Calibrated: <strong>{baselineTimestamp}</strong>
           </span>

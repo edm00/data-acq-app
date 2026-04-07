@@ -13,8 +13,7 @@ const PredictionPanel = ({ currentSensorData, isConnected, addLog }) => {
   const API_URL = "http://127.0.0.1:8000";
   const [baselineTimestamp, setBaselineTimestamp] = useState(null);
 
-
-// --- 1. Retrieve Baseline from Cookies on Component Mount ---
+  // --- 1. Retrieve Baseline from Cookies on Component Mount ---
   useEffect(() => {
     const savedBaseline = Cookies.get('sensor_baseline');
     const savedTime = Cookies.get('baseline_timestamp');
